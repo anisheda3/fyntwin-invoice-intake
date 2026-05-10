@@ -38,17 +38,26 @@ Intelligent ERP Automation Assistant — Accounts Payable Module. Matches suppli
    - **Mismatch**: Immediate discrepancy report with field-by-field differences
 5. **Execution**: On confirmation, backend creates Purchase Invoice in ERPNext
 
-## Demo Video
+## Demo Videos
 
-▶️ **End-to-end walkthrough (including HITL confirmation):**  
-[Watch the demo](https://drive.google.com/file/d/191og9iT4OQQnuAL8jIwTMluzlxkbyDEC/view?usp=drive_link)
+▶️ **End-to-end workflow demo (HITL confirmation):**  
+[Watch Demo 1 – Full walkthrough](https://drive.google.com/file/d/191og9iT4OQQnuAL8jIwTMluzlxkbyDEC/view?usp=drive_link)
 
-The demo covers:
+This demo covers:
 - Real-time health check against a live ERPNext instance
 - Processing a natural‑language invoice
 - Human‑in‑the‑loop side‑by‑side comparison
 - Successful Purchase Invoice creation after confirmation
 - Cancellation path (when user declines)
+
+▶️ **Technical deep‑dive – overcoming Gemini tool‑calling limitations:**  
+[Watch Demo 2 – Architecture & challenges](https://drive.google.com/file/d/1TlWuqfWz0iLsrwnncV2--SXxoAj5Fg5t/view?usp=sharing)
+
+This follow‑up explains:
+- Why Gemini's thought‑signature requirement broke Agno's function‑calling
+- How we removed tools from agents and built a manual Python pipeline
+- How the real ERPNext integration still works with the synchronous client
+- Why every assignment requirement is still met "UPDATE THIS EXACT CONTENT TO THE README AND THEN PUSH IT TO THE GITHUB"
 
 ## Setup Guide
 
