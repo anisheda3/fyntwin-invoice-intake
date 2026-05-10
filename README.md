@@ -6,10 +6,12 @@ Intelligent ERP Automation Assistant — Accounts Payable Module. Matches suppli
 
 ### Backend (FastAPI + Agno Agents)
 
-- **IntakeAgent**: Parses natural language invoice descriptions into structured JSON using RAG (LanceDB + Gemini Embeddings)
-- **ValidatorAgent**: Fetches Purchase Orders from ERPNext and compares fields (supplier, items, quantities, rates, totals)
-- **ActionAgent**: Decides outcome — HITL confirmation on match, discrepancy report on mismatch, or creates Purchase Invoice after approval
+- **IntakeAgent**: Parses natural language invoice descriptions into structured JSON
+- **ValidatorAgent**: Compares extracted invoice data against real Purchase Order data fetched from ERPNext
+- **ActionAgent**: Decides outcome — HITL confirmation on match, discrepancy report on mismatch
 - **Team Coordination**: Agno's coordinate mode orchestrates the 3-agent pipeline deterministically
+
+**Note on Tool Calling:** Due to Gemini's recent requirement for thought signatures in function calls (not yet supported by Agno), ERPNext API interactions are handled directly in Python using a synchronous client. The agents focus purely on language tasks (parsing, comparing, deciding), while the workflow layer in `team.py` performs the actual ERPNext reads/writes. This maintains a clean separation of concerns and ensures reliable operation without framework compatibility issues.
 
 ### Frontend (React + Vite)
 
@@ -22,8 +24,7 @@ Intelligent ERP Automation Assistant — Accounts Payable Module. Matches suppli
 ### Key Features
 
 - **HITL (Human-in-the-Loop)**: Full matches require explicit confirmation before creating Purchase Invoices
-- **RAG Knowledge Base**: Gemini embeddings for Indian invoice format conversion (1,25,000 = 125000.0)
-- **ERPNext Integration**: REST API client with robust error handling and authentication
+- **Real ERPNext Integration**: REST API client with robust error handling and authentication
 - **Conditional Branching**: Match → HITL pause; Mismatch → immediate discrepancy report
 - **Session Persistence**: Agno SQLite storage for conversation history
 
@@ -31,16 +32,16 @@ Intelligent ERP Automation Assistant — Accounts Payable Module. Matches suppli
 
 1. **Invoice Submission**: User describes invoice in natural language
 2. **Parsing**: IntakeAgent extracts supplier, PO reference, items, amounts
-3. **Validation**: ValidatorAgent fetches PO from ERPNext and compares all fields
+3. **Validation**: Backend fetches the real Purchase Order from ERPNext, then ValidatorAgent compares all fields
 4. **Decision**:
    - **Match**: HITL pause — user reviews comparison table and confirms/cancels
    - **Mismatch**: Immediate discrepancy report with field-by-field differences
-5. **Execution**: On confirmation, ActionAgent creates Purchase Invoice in ERPNext
+5. **Execution**: On confirmation, backend creates Purchase Invoice in ERPNext
 
 ## Demo Video
 
 ▶️ **End-to-end walkthrough (including HITL confirmation):**  
-[![Watch the demo](https://img.youtube.com/vi/placeholder/0.jpg)](https://drive.google.com/file/d/191og9iT4OQQnuAL8jIwTMluzlxkbyDEC/view?usp=drive_link)
+[Watch the demo](https://drive.google.com/file/d/191og9iT4OQQnuAL8jIwTMluzlxkbyDEC/view?usp=drive_link)
 
 The demo covers:
 - Real-time health check against a live ERPNext instance
@@ -76,7 +77,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your real ERPNext and Gemini credentials
 
-# Run backend
+# Run backend (from project root)
 uvicorn backend.main:app --reload --port 8000
 ```
 
@@ -109,54 +110,56 @@ Open http://localhost:5173 — backend must be running on port 8000.
 All settings via `.env`:
 
 - `ERPNEXT_BASE_URL` — Your ERPNext instance URL
+- `ERPNEXT_API_KEY` — ERPNext API key
+- `ERPNEXT_API_SECRET` — ERPNext API secret
 - `GEMINI_API_KEY` — Google AI Studio API key
-- `INTAKE_MODEL` — Gemini model for parsing (default: gemini-2.0-flash)
+- `INTAKE_MODEL` — Gemini model for parsing (default: gemini-flash-latest)
 - `VALIDATOR_MODEL` — Gemini model for validation
 - `ACTION_MODEL` — Gemini model for decisions
 - `EMBEDDING_MODEL` — For RAG (default: models/gemini-embedding-001)
+- `AGNO_STORAGE_PATH` — Path to SQLite database for sessions
+- `ALLOWED_ORIGINS` — CORS allowed origins
 
 ## Development
 
 ### Testing the Pipeline
 
 ```bash
-# Test parsing only
+# Test with a matching invoice prompt
 curl -X POST http://localhost:8000/api/v1/run \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Invoice from Tech Distributors for Rs 1,25,000 — 25 units SSD at Rs 5,000 each. Against PO-2024-0045."}'
+  -d '{"prompt": "We received an invoice from supplier Summit Traders Ltd. for Rs 53,200 — 76 units of SKU009: Head at Rs 700 each. They say it is against PUR-ORD-2026-00009."}'
 
 # Check health
 curl http://localhost:8000/api/v1/health
 ```
 
-### Adding New Agents
+### Project Structure
 
-1. Create `backend/agents/agent_4.py`
-2. Add to `team.py` members list
-3. Update instructions for coordination
-
-## Deployment
-
-### Docker (Recommended)
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
-
-### Production Notes
-
-- Use production Gemini models for higher rate limits
-- Configure CORS for your domain
-- Set up proper logging and monitoring
-- Backup Agno SQLite database regularly
+fyntwin-invoice-intake/
+├── backend/
+│   ├── main.py                    # FastAPI app entry point
+│   ├── config.py                  # pydantic-settings, loads .env
+│   ├── routes/
+│   │   ├── agent.py               # POST /api/v1/run  |  POST /api/v1/confirm
+│   │   └── health.py              # GET /api/v1/health  |  GET /api/v1/history
+│   ├── agents/
+│   │   ├── team.py                # Workflow orchestration + real ERP calls
+│   │   ├── agent_1.py             # IntakeAgent (NLP parsing)
+│   │   ├── agent_2.py             # ValidatorAgent (comparison)
+│   │   └── agent_3.py             # ActionAgent (decision)
+│   ├── tools/
+│   │   └── erpnext_tools.py       # @tool-decorated ERPNext functions (available for inspection)
+│   ├── schemas/
+│   │   └── models.py              # Pydantic request/response models
+│   └── services/
+│       └── erpnext_client.py      # Reusable ERPNext HTTP client (sync + async)
+├── frontend/                      # React UI
+├── .env.example
+├── requirements.txt
+└── README.md
+```
 
 ## Troubleshooting
 
@@ -173,16 +176,15 @@ CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ### Agents Not Working
 
-- Gemini API key valid?
-- Check Agno logs for tool call failures
-- Verify ERPNext API permissions
+- Gemini API key valid and has quota?
+- If you see "thought_signature" errors, switch to `gemini-flash-latest` model
+- If you get 404, the model name may have changed — check Google AI Studio for available models
 
 ### Common Issues
 
-- **PO not found**: Check PO name format (PO-YYYY-NNNNN)
-- **Supplier mismatch**: Case-sensitive comparison
-- **Amount calculation**: Ensure qty × rate = amount
-- **Embedding model**: Use `models/text-embedding-004` for free tier
+- **PO not found**: Ensure PO name in prompt matches exactly (e.g., PUR-ORD-2026-00009)
+- **Supplier mismatch**: The comparison is case-insensitive and allows partial matches
+- **Amount calculation**: Ensure qty × rate = amount in your prompt
 
 ## License
 

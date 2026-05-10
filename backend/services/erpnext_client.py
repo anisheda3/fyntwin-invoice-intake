@@ -1,8 +1,9 @@
 # Singleton ERPNext HTTP client
 """
 Single reusable ERPNext HTTP client.
-ALL ERPNext API calls in this project go through this class.
-Config loaded via relative import — nothing hardcoded.
+Provides BOTH async (for FastAPI routes) and sync (for Agno tools) clients.
+Agno's Gemini integration does not correctly await async tool results,
+so all @tool functions must be synchronous.
 """
 
 import json as _json
@@ -26,11 +27,55 @@ class ERPNextError(Exception):
         super().__init__(f"ERPNext {status_code}: {message}")
 
 
+def _parse_response(response: httpx.Response) -> Any:
+    """
+    Shared response parser for both sync and async clients.
+    ERPNext does NOT always return clean JSON on failure.
+    """
+    raw_text = response.text
+
+    if response.status_code == 200:
+        try:
+            data = response.json()
+            return data.get("data", data)
+        except Exception:
+            raise ERPNextError(
+                200, "Response was 200 but not valid JSON", raw_text
+            )
+
+    message = f"HTTP {response.status_code}"
+    try:
+        err_json = response.json()
+        message = (
+            err_json.get("message")
+            or err_json.get("exception")
+            or err_json.get("exc_type")
+            or str(err_json)
+        )
+        if "_server_messages" in err_json:
+            try:
+                msgs = _json.loads(err_json["_server_messages"])
+                if isinstance(msgs, list) and msgs:
+                    inner = _json.loads(msgs[0])
+                    message = inner.get("message", message)
+            except Exception:
+                pass
+    except Exception:
+        message = raw_text[:500] if raw_text else message
+
+    logger.error(
+        "ERPNext error %s: %s | raw: %.200s",
+        response.status_code,
+        message,
+        raw_text,
+    )
+    raise ERPNextError(response.status_code, message, raw_text)
+
+
 class ERPNextClient:
     """
-    Reusable async HTTP client for the ERPNext REST API.
-    Handles authentication, request building, and error parsing.
-    ERPNext does NOT always return clean JSON on failure.
+    Async ERPNext HTTP client — used by FastAPI route handlers only.
+    Do NOT use this inside @tool functions.
     """
 
     def __init__(self):
@@ -50,48 +95,7 @@ class ERPNextClient:
         )
 
     async def _handle_response(self, response: httpx.Response) -> Any:
-        """
-        Parse ERPNext response safely.
-        Handles: clean JSON, HTML error pages, Frappe error format, plain text.
-        """
-        raw_text = response.text
-
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                return data.get("data", data)
-            except Exception:
-                raise ERPNextError(
-                    200, "Response was 200 but not valid JSON", raw_text
-                )
-
-        message = f"HTTP {response.status_code}"
-        try:
-            err_json = response.json()
-            message = (
-                err_json.get("message")
-                or err_json.get("exception")
-                or err_json.get("exc_type")
-                or str(err_json)
-            )
-            if "_server_messages" in err_json:
-                try:
-                    msgs = _json.loads(err_json["_server_messages"])
-                    if isinstance(msgs, list) and msgs:
-                        inner = _json.loads(msgs[0])
-                        message = inner.get("message", message)
-                except Exception:
-                    pass
-        except Exception:
-            message = raw_text[:500] if raw_text else message
-
-        logger.error(
-            "ERPNext error %s: %s | raw: %.200s",
-            response.status_code,
-            message,
-            raw_text,
-        )
-        raise ERPNextError(response.status_code, message, raw_text)
+        return _parse_response(response)
 
     async def get(
         self,
@@ -101,7 +105,6 @@ class ERPNextClient:
         fields: Optional[list[str]] = None,
         limit: int = 20,
     ) -> Any:
-        """Fetch one document by name or a filtered list."""
         if name:
             url = f"/api/resource/{doctype}/{name}"
             response = await self._client.get(url)
@@ -113,13 +116,9 @@ class ERPNextClient:
                 params["fields"] = _json.dumps(fields)
             url = f"/api/resource/{doctype}"
             response = await self._client.get(url, params=params)
-
         return await self._handle_response(response)
 
-    async def post(
-        self, doctype: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Create a new document."""
+    async def post(self, doctype: str, data: dict[str, Any]) -> dict[str, Any]:
         url = f"/api/resource/{doctype}"
         response = await self._client.post(url, json=data)
         return await self._handle_response(response)
@@ -127,10 +126,94 @@ class ERPNextClient:
     async def put(
         self, doctype: str, name: str, data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an existing document."""
         url = f"/api/resource/{doctype}/{name}"
         response = await self._client.put(url, json=data)
         return await self._handle_response(response)
+
+    async def aclose(self):
+        await self._client.aclose()
+
+
+class SyncERPNextClient:
+    """
+    SYNCHRONOUS ERPNext HTTP client — used exclusively inside @tool functions.
+    Agno's Gemini tool integration does not await coroutines correctly,
+    so all tools must be sync. This client uses httpx.Client (blocking).
+    """
+
+    def __init__(self):
+        settings = get_settings()
+        self.base_url = settings.erpnext_base_url.rstrip("/")
+        self._auth_header = {
+            "Authorization": (
+                f"token {settings.erpnext_api_key}:{settings.erpnext_api_secret}"
+            ),
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            headers=self._auth_header,
+            timeout=30.0,
+        )
+
+    def get(
+        self,
+        doctype: str,
+        name: Optional[str] = None,
+        filters: Optional[list] = None,
+        fields: Optional[list[str]] = None,
+        limit: int = 20,
+    ) -> Any:
+        """Fetch one document by name or a filtered list."""
+        if name:
+            url = f"/api/resource/{doctype}/{name}"
+            response = self._client.get(url)
+        else:
+            params: dict[str, Any] = {"limit": limit}
+            if filters:
+                params["filters"] = _json.dumps(filters)
+            if fields:
+                params["fields"] = _json.dumps(fields)
+            url = f"/api/resource/{doctype}"
+            response = self._client.get(url, params=params)
+        return _parse_response(response)
+
+    def post(self, doctype: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Create a new document."""
+        url = f"/api/resource/{doctype}"
+        response = self._client.post(url, json=data)
+        return _parse_response(response)
+
+    def put(
+        self, doctype: str, name: str, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update an existing document."""
+        url = f"/api/resource/{doctype}/{name}"
+        response = self._client.put(url, json=data)
+        return _parse_response(response)
+
+
+# ── Singletons ────────────────────────────────────────────────────────────────
+
+_async_client_instance: Optional[ERPNextClient] = None
+_sync_client_instance: Optional[SyncERPNextClient] = None
+
+
+def get_erpnext_client() -> ERPNextClient:
+    """Returns the async client — for FastAPI route handlers only."""
+    global _async_client_instance
+    if _async_client_instance is None:
+        _async_client_instance = ERPNextClient()
+    return _async_client_instance
+
+
+def get_sync_erpnext_client() -> SyncERPNextClient:
+    """Returns the sync client — for @tool functions only."""
+    global _sync_client_instance
+    if _sync_client_instance is None:
+        _sync_client_instance = SyncERPNextClient()
+    return _sync_client_instance
 
     async def call_method(
         self, method: str, data: Optional[dict[str, Any]] = None
