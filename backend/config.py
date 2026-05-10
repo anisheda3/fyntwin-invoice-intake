@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     intake_model: str = "gemini-2.0-flash"
     validator_model: str = "gemini-2.0-flash"
     action_model: str = "gemini-2.0-flash"
+    demo_mode: bool = False
 
     # Embedding model for RAG
     embedding_model: str = "models/gemini-embedding-001"
