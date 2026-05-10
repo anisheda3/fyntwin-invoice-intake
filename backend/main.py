@@ -16,6 +16,7 @@ from .config import get_settings
 from .routes.agent import router as agent_router
 from .routes.health import router as health_router
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",

@@ -12,8 +12,8 @@ import logging
 
 from agno.agent import Agent
 from agno.embedder.google import GeminiEmbedder
-from agno.knowledge.text import TextKnowledgeBase
 from agno.models.google import Gemini
+from agno.knowledge.text import TextKnowledgeBase
 from agno.vectordb.lancedb import LanceDb
 
 from ..config import get_settings

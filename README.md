@@ -37,6 +37,18 @@ Intelligent ERP Automation Assistant — Accounts Payable Module. Matches suppli
    - **Mismatch**: Immediate discrepancy report with field-by-field differences
 5. **Execution**: On confirmation, ActionAgent creates Purchase Invoice in ERPNext
 
+## Demo Video
+
+▶️ **End-to-end walkthrough (including HITL confirmation):**  
+[![Watch the demo](https://img.youtube.com/vi/placeholder/0.jpg)](https://drive.google.com/file/d/191og9iT4OQQnuAL8jIwTMluzlxkbyDEC/view?usp=drive_link)
+
+The demo covers:
+- Real-time health check against a live ERPNext instance
+- Processing a natural‑language invoice
+- Human‑in‑the‑loop side‑by‑side comparison
+- Successful Purchase Invoice creation after confirmation
+- Cancellation path (when user declines)
+
 ## Setup Guide
 
 ### Prerequisites
@@ -101,7 +113,7 @@ All settings via `.env`:
 - `INTAKE_MODEL` — Gemini model for parsing (default: gemini-2.0-flash)
 - `VALIDATOR_MODEL` — Gemini model for validation
 - `ACTION_MODEL` — Gemini model for decisions
-- `EMBEDDING_MODEL` — For RAG (default: models/text-embedding-004)
+- `EMBEDDING_MODEL` — For RAG (default: models/gemini-embedding-001)
 
 ## Development
 

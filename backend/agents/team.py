@@ -122,30 +122,12 @@ async def run_invoice_workflow(
     prompt: str,
     session_id: Optional[str] = None,
 ) -> RunResponse:
-    """
-    Main workflow entry point. Called by POST /api/v1/run.
-
-    Conditional branch:
-      is_match=True  -> HITL pause
-      is_match=False -> discrepancy report
-    """
     sid = session_id or str(uuid.uuid4())
-
     try:
-        response = await invoice_team.arun(
-            message=prompt,
-            session_id=sid,
-        )
-
-        raw_output = (
-            response.content if hasattr(response, "content") else str(response)
-        )
-        logger.info("Team raw output for session %s: %.300s", sid, raw_output)
-
+        response = await invoice_team.arun(message=prompt, session_id=sid)
+        raw_output = response.content if hasattr(response, "content") else str(response)
         result = _extract_json(raw_output)
         status = result.get("status", "error")
-
-        # ── CONDITIONAL BRANCH ─────────────────────────────────────────────
 
         if status == "awaiting_confirmation":
             _hitl_sessions[sid] = {
@@ -203,37 +185,41 @@ async def run_invoice_workflow(
 
             return RunResponse(
                 session_id=sid,
-                status="completed",
-                message=dr.get("summary", "Discrepancy found. Invoice not created."),
+                status="error",
+                message=dr.get("summary", "Discrepancy detected."),
                 agents_involved=_AGENTS_INVOLVED,
                 result=result,
                 discrepancy_report=discrepancy_report,
+            )
+
+        elif status == "completed":
+            return RunResponse(
+                session_id=sid,
+                status="completed",
+                message=result.get("message", "Invoice processing completed."),
+                agents_involved=_AGENTS_INVOLVED,
+                result=result,
             )
 
         else:
             return RunResponse(
                 session_id=sid,
                 status="error",
-                message=result.get("message", "Unexpected response from agent team."),
+                message=result.get("message", "Unexpected workflow status."),
                 agents_involved=_AGENTS_INVOLVED,
                 result=result,
             )
-
     except Exception as e:
-        logger.exception("Error in invoice workflow for session %s", sid)
+        logger.exception("Error running invoice workflow for session %s", sid)
         return RunResponse(
             session_id=sid,
             status="error",
-            message=f"System error: {str(e)}",
+            message=f"Error running invoice workflow: {str(e)}",
             agents_involved=_AGENTS_INVOLVED,
         )
 
 
-async def resume_after_confirmation(
-    session_id: str,
-    confirmed: bool,
-) -> ConfirmResponse:
-    """Resume a paused HITL session. Called by POST /api/v1/confirm."""
+async def resume_after_confirmation(session_id: str, confirmed: bool) -> ConfirmResponse:
     session = _hitl_sessions.get(session_id)
 
     if not session:
@@ -268,15 +254,13 @@ async def resume_after_confirmation(
             f"Supplier: {po_data.get('supplier')}. "
             f"Items: {json.dumps(po_data.get('items', []))}. "
             f"Company: {po_data.get('company', '')}. "
-            f"Posting date: {datetime.utcnow().strftime('%Y-%m-%d')}."
-        )
+            f"Posting date: {datetime.utcnow().strftime('%Y-%m-%d')}.")
 
         response = await action_agent.arun(message=confirm_prompt)
         raw_output = (
             response.content if hasattr(response, "content") else str(response)
         )
         logger.info("ActionAgent confirm output: %.200s", raw_output)
-
         action_result = _extract_json(raw_output)
         final_status = action_result.get("status", "completed")
         _hitl_sessions[session_id]["status"] = final_status
@@ -284,10 +268,11 @@ async def resume_after_confirmation(
         return ConfirmResponse(
             session_id=session_id,
             status=final_status,
-            message=action_result.get("message", "Purchase Invoice created successfully."),
+            message=action_result.get(
+                "message", "Purchase Invoice created successfully."
+            ),
             created_document=action_result.get("created_document"),
         )
-
     except Exception as e:
         logger.exception("Error resuming session %s", session_id)
         _hitl_sessions[session_id]["status"] = "error"

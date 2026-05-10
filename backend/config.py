@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     action_model: str = "gemini-2.0-flash"
 
     # Embedding model for RAG
-    embedding_model: str = "models/text-embedding-004"
+    embedding_model: str = "models/gemini-embedding-001"
 
     # Agno SQLite storage path
     agno_storage_path: str = "./data/agno_sessions.db"
